@@ -9,7 +9,7 @@
       "description": "Read a document in order like a first-time reader and report on pacing, boredom, unmet setups, and clarity",
       "source": "./plugins/cold-reader",
       "category": "writing",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }

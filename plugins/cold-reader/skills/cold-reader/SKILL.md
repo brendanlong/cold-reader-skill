@@ -30,9 +30,24 @@ skill does: a subagent reads numbered chunk files one at a time, keeps notes, an
 ### 1. Get the document into Markdown
 
 The chunker takes Markdown. If the source is HTML, docx, PDF, etc., convert it first —
-`pandoc input.html -t gfm -o /tmp/source.md` handles most formats. If the user gave you a
-URL, fetch it and convert to Markdown. Save the Markdown somewhere like `/tmp/source.md`.
-Keep the file next to its images if they're local, since image paths resolve relative to it.
+`pandoc input.html -t gfm -o /tmp/source.md` handles most formats. Save the Markdown
+somewhere like `/tmp/source.md`. Keep the file next to its images if they're local, since
+image paths resolve relative to it.
+
+**If the user gave you a URL**, prefer a readability-style extractor over converting the
+raw page — a full-page `pandoc` keeps the nav, sidebar, and footer as chunks, which
+unfairly pollutes the cold read. A tool like `trafilatura` (`trafilatura -u URL --markdown
+--images > /tmp/source.md`, or the Python API with `output_format="markdown"`) strips the
+boilerplate, extracts the title, and rewrites image URLs to absolute in one step. No
+extractor is perfect across CMS themes, so **eyeball the result before chunking**: check
+that headings survived as headings (some themes self-link headings, which extractors can
+flatten into plain links) and drop any print-only footnote/URL dumps. Then:
+
+- If images are still **page-relative** (e.g. `images/foo.png`, common when you used
+  `pandoc` on a downloaded page), pass `--base-url "<the page URL>"` to the chunker so it
+  resolves and downloads them instead of failing to alt text. This matters most for
+  image-heavy posts, where losing the figures guts the read.
+- If the extractor gave you a body without the title, supply it with `--title` (step 3).
 
 ### 2. Choose persona(s)
 
@@ -63,6 +78,10 @@ Flags:
   the body — it's often what tells them what the piece is about and bridges the opening — so
   omitting it makes the cold read unfairly harsh on the intro. Many exports (e.g. the
   LessWrong API `markdown` field) give you the body without the title; supply it here.
+- `--base-url "..."` — the original page URL. Page-relative image srcs (e.g.
+  `images/foo.png` from a fetched HTML page) are resolved against it and downloaded, instead
+  of being looked up as local files and degrading to alt text. Pass this whenever the
+  Markdown came from a URL and still has relative image paths.
 - `--no-vision` — replace images with `Image: <alt text>` (how a screen-reader user
   experiences them). Use this to evaluate accessibility, or if the reading agent has no vision.
 - `--target-words N` — approx. words before a long paragraph is split at sentence
@@ -160,4 +179,5 @@ include each persona's full report.
 - The reading subagent, not you, must do the cold read — you've already seen context that
   would spoil it. Your job is setup, orchestration, and synthesis.
 - Images resolve relative to the source Markdown file. Remote image URLs are downloaded; if
-  one can't be fetched it degrades to alt text automatically (a warning is printed).
+  one can't be fetched it degrades to alt text automatically (a warning is printed). Pass
+  `--base-url` when the Markdown came from a URL and still references images by relative path.
