@@ -1,0 +1,15 @@
+{
+  "name": "cold-reader-skill",
+  "owner": {
+    "name": "Brendan"
+  },
+  "plugins": [
+    {
+      "name": "cold-reader",
+      "description": "Read a document in order like a first-time reader and report on pacing, boredom, unmet setups, and clarity",
+      "source": "./plugins/cold-reader",
+      "category": "writing",
+      "version": "0.1.0"
+    }
+  ]
+}
