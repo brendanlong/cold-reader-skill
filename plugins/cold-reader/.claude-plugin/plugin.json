@@ -1,0 +1,7 @@
+{
+  "name": "cold-reader",
+  "description": "Read a document in order like a first-time reader and report on pacing, boredom, unmet setups, and clarity",
+  "author": {
+    "name": "Brendan"
+  }
+}
