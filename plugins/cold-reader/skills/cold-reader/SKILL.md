@@ -84,8 +84,13 @@ Flags:
   Markdown came from a URL and still has relative image paths.
 - `--no-vision` — replace images with `Image: <alt text>` (how a screen-reader user
   experiences them). Use this to evaluate accessibility, or if the reading agent has no vision.
-- `--target-words N` — approx. words before a long paragraph is split at sentence
-  boundaries (default 90). Short paragraphs are always kept whole.
+- `--target-words N` — target words per chunk (default 90). Sentences and list items are
+  accumulated up to this size, then flushed: short paragraphs and list bullets merge into a
+  natural reading unit instead of one tiny chunk each, and a long paragraph splits at sentence
+  boundaries near the target. Headings, images, code, and tables are always hard breaks.
+- `--min-words N` — floor below which a chunk keeps accumulating across a paragraph/list
+  boundary rather than flushing (default: half of `--target-words`), so a chunk isn't emitted
+  far below target just because a block ended.
 
 If it exits 0, the setup is valid — there is no separate validation step. The script
 prints the chunk count and image count; note them.
