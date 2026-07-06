@@ -9,10 +9,19 @@
 # ///
 """Split a Markdown document into numbered chunk files for the cold-reader skill.
 
-One chunk per block (paragraph, heading, list item, table, code block, image).
-A paragraph or list item stays whole unless it exceeds --target-words, in which
-case it is split at sentence boundaries into groups up to that length. Authorial
-paragraph breaks are always preserved (we split, never merge across them).
+Chunks approximate a natural reading unit rather than a single block. Sentences
+(within a paragraph) and items (within a list) are greedily accumulated into the
+current chunk until adding the next one would push it past --target-words, at
+which point the chunk is flushed. Short paragraphs and list items therefore merge
+together instead of becoming one tiny chunk each: a 5-item list of short bullets
+becomes one chunk (or two), not five, and a run of one-line paragraphs merges up
+toward the target. A genuinely long paragraph still splits at sentence boundaries
+near the target. Headings, images, code/tables and other media are hard breaks:
+the accumulator flushes before them and never merges across them.
+
+A chunk that has reached --min-words is flushed at a soft boundary (end of a
+paragraph or list); below that floor it keeps accumulating across the boundary so
+a chunk is not emitted far below target just because a block ended.
 
 Output: <workdir>/chunk-001.md, chunk-002.png, chunk-003.md, ...
 Zero-padded so the files sort in reading order. Images are extracted to their
@@ -41,10 +50,12 @@ import pysbd
 import requests
 from markdown_it import MarkdownIt
 
-# Block tokens that are read whole and never split by sentence.
-ATOMIC = {"heading", "fence", "code_block", "table", "html_block", "math_block"}
-# Block tokens whose prose is split when longer than the target.
-PROSE = {"paragraph", "blockquote"}
+# Block tokens that are hard breaks: read whole, standing as their own chunk.
+# Blockquotes are here too — a quote is a distinct reading unit and its ">" lines
+# would be mangled if sentences were merged with surrounding prose.
+ATOMIC = {"heading", "fence", "code_block", "table", "html_block", "math_block", "blockquote"}
+# Block tokens whose sentences feed the accumulator.
+PROSE = {"paragraph"}
 
 IMG_MD = re.compile(r"^!\[(?P<alt>[^\]]*)\]\((?P<src>[^)\s]+)(?:\s+\"[^\"]*\")?\)\s*$")
 IMG_HTML = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
@@ -130,30 +141,59 @@ def detect_image(block_type: str, text: str):
     return None
 
 
-def split_prose(text: str, target_words: int, segmenter) -> list[str]:
-    """Greedily pack whole sentences into chunks of up to ~target_words."""
-    words = len(text.split())
-    if words <= target_words:
-        return [text]
+def sentences_of(text: str, segmenter) -> list[str]:
+    """Split prose into whole sentences, falling back to the block as one unit."""
     sentences = [s.strip() for s in segmenter.segment(text) if s.strip()]
-    if len(sentences) <= 1:
-        return [text]
-    chunks: list[str] = []
-    current: list[str] = []
-    count = 0
-    for sent in sentences:
-        n = len(sent.split())
-        if current and count + n > target_words:
-            chunks.append(" ".join(current))
-            current, count = [], 0
-        current.append(sent)
-        count += n
-    if current:
-        chunks.append(" ".join(current))
-    # Merge a tiny trailing chunk back into the previous one.
-    if len(chunks) >= 2 and len(chunks[-1].split()) < target_words * 0.4:
-        chunks[-2] = chunks[-2] + " " + chunks.pop()
-    return chunks
+    return sentences or [text.strip()]
+
+
+class Accumulator:
+    """Greedily packs sentence/item units into readable chunks.
+
+    A unit is added with the separator that joins it to the previous unit if the
+    two land in the same chunk. Adding a unit that would push the running chunk
+    past ``target_words`` flushes first (the ceiling). ``soft_boundary`` — called
+    at the end of a paragraph or list — flushes only once the chunk has reached
+    ``min_words`` (the floor), so small blocks keep accumulating across the break.
+    Hard units (headings, images, code, tables) flush the accumulator and stand
+    alone; nothing merges across them.
+    """
+
+    def __init__(self, target_words: int, min_words: int):
+        self.target_words = target_words
+        self.min_words = min_words
+        self.parts: list[tuple[str, str]] = []  # (separator-before, text)
+        self.words = 0
+        self.chunks: list[tuple[str, object]] = []
+
+    def _flush(self) -> None:
+        if not self.parts:
+            return
+        text = self.parts[0][1]
+        for sep, part in self.parts[1:]:
+            text += sep + part
+        self.chunks.append(("text", text))
+        self.parts = []
+        self.words = 0
+
+    def add_soft(self, text: str, sep: str) -> None:
+        n = len(text.split())
+        if self.parts and self.words + n > self.target_words:
+            self._flush()
+        self.parts.append((sep, text))
+        self.words += n
+
+    def soft_boundary(self) -> None:
+        if self.words >= self.min_words:
+            self._flush()
+
+    def add_hard(self, chunk: tuple[str, object]) -> None:
+        self._flush()
+        self.chunks.append(chunk)
+
+    def finish(self) -> list[tuple[str, object]]:
+        self._flush()
+        return self.chunks
 
 
 def resolve_image_bytes(src: str, base_dir: Path, base_url: str | None = None):
@@ -184,9 +224,13 @@ def main() -> int:
     ap.add_argument("--workdir", required=True, help="Output directory for chunk files")
     ap.add_argument("--title", help="Document title; emitted as the first chunk (an H1), the way a real reader sees it before the body")
     ap.add_argument("--base-url", help="Original page URL; page-relative image srcs (e.g. images/foo.png from a fetched HTML page) are resolved against it and downloaded")
-    ap.add_argument("--target-words", type=int, default=90, help="Approx. words before a paragraph is split (default: 90)")
+    ap.add_argument("--target-words", type=int, default=90, help="Target words per chunk; the upper bound where a chunk is flushed (default: 90)")
+    ap.add_argument("--min-words", type=int, default=None, help="Floor below which a chunk keeps accumulating past a paragraph/list boundary (default: half of --target-words)")
     ap.add_argument("--no-vision", action="store_true", help="Replace images with 'Image: <alt text>' instead of extracting them")
     args = ap.parse_args()
+
+    min_words = args.min_words if args.min_words is not None else max(1, args.target_words // 2)
+    min_words = min(min_words, args.target_words)
 
     source = Path(args.source)
     if not source.is_file():
@@ -199,41 +243,55 @@ def main() -> int:
     segmenter = pysbd.Segmenter(language="en", clean=False)
     md_text = source.read_text(encoding="utf-8")
 
-    chunks: list[tuple[str, str]] = []  # (kind, payload) where kind is "text" or "image:<ext>"
+    acc = Accumulator(args.target_words, min_words)
     image_count = 0
     image_errors: list[str] = []
 
     if args.title and args.title.strip():
         # A real reader sees the title first; give it its own leading chunk as an H1.
         title = args.title.strip().lstrip("#").strip()
-        chunks.append(("text", f"# {title}"))
+        acc.add_hard(("text", f"# {title}"))
 
+    prev_type: str | None = None
     for block_type, text in top_level_blocks(md_text):
         if not text.strip():
+            prev_type = None
             continue
         img = detect_image(block_type, text)
         if img is not None:
             alt, src = img
             if args.no_vision:
-                chunks.append(("text", f"Image: {alt}" if alt.strip() else "Image: (no alt text provided)"))
+                acc.add_hard(("text", f"Image: {alt}" if alt.strip() else "Image: (no alt text provided)"))
             else:
                 try:
                     raw, ext = resolve_image_bytes(src, base_dir, args.base_url)
-                    chunks.append((f"image:{ext}", None))  # payload filled after we know the index
-                    chunks[-1] = (f"image:{ext}", raw)
+                    acc.add_hard((f"image:{ext}", raw))
                     image_count += 1
                 except Exception as e:  # noqa: BLE001 - degrade to alt text on any failure
                     image_errors.append(f"{src}: {e}")
-                    chunks.append(("text", f"Image: {alt}" if alt.strip() else "Image: (image could not be loaded)"))
+                    acc.add_hard(("text", f"Image: {alt}" if alt.strip() else "Image: (image could not be loaded)"))
+            prev_type = None
             continue
         if block_type in ATOMIC:
-            chunks.append(("text", text))
-        elif block_type in PROSE or block_type == "list_item":
-            for piece in split_prose(text, args.target_words, segmenter):
-                chunks.append(("text", piece))
+            # Headings, code, tables, etc. are hard breaks read whole.
+            acc.add_hard(("text", text))
+            prev_type = None
+        elif block_type in PROSE:
+            # Feed sentences; the first joins to any prior block across a blank line.
+            for i, sent in enumerate(sentences_of(text, segmenter)):
+                acc.add_soft(sent, " " if i > 0 else "\n\n")
+            acc.soft_boundary()
+            prev_type = block_type
+        elif block_type == "list_item":
+            # Consecutive items share a chunk (joined tight); a new list starts a block.
+            acc.add_soft(text, "\n" if prev_type == "list_item" else "\n\n")
+            acc.soft_boundary()
+            prev_type = block_type
         else:
-            chunks.append(("text", text))
+            acc.add_hard(("text", text))
+            prev_type = None
 
+    chunks = acc.finish()
     width = max(3, len(str(len(chunks))))
     for idx, (kind, payload) in enumerate(chunks, start=1):
         stem = f"chunk-{idx:0{width}d}"
