@@ -156,13 +156,17 @@ def split_prose(text: str, target_words: int, segmenter) -> list[str]:
     return chunks
 
 
-def resolve_image_bytes(src: str, base_dir: Path):
+def resolve_image_bytes(src: str, base_dir: Path, base_url: str | None = None):
     """Return (bytes, suggested_extension) for a local path, URL, or data URI."""
     if src.startswith("data:"):
         header, _, data = src.partition(",")
         ext = mimetypes.guess_extension(header[5:].split(";")[0]) or ".png"
         raw = base64.b64decode(data) if ";base64" in header else urllib.parse.unquote_to_bytes(data)
         return raw, ext
+    if base_url and not src.startswith(("http://", "https://")):
+        # Page-relative src (e.g. from a fetched HTML page): resolve it against
+        # the document's source URL so it can be downloaded rather than read locally.
+        src = urllib.parse.urljoin(base_url, src)
     if src.startswith(("http://", "https://")):
         resp = requests.get(src, timeout=30)
         resp.raise_for_status()
@@ -179,6 +183,7 @@ def main() -> int:
     ap.add_argument("source", help="Path to the source Markdown file")
     ap.add_argument("--workdir", required=True, help="Output directory for chunk files")
     ap.add_argument("--title", help="Document title; emitted as the first chunk (an H1), the way a real reader sees it before the body")
+    ap.add_argument("--base-url", help="Original page URL; page-relative image srcs (e.g. images/foo.png from a fetched HTML page) are resolved against it and downloaded")
     ap.add_argument("--target-words", type=int, default=90, help="Approx. words before a paragraph is split (default: 90)")
     ap.add_argument("--no-vision", action="store_true", help="Replace images with 'Image: <alt text>' instead of extracting them")
     args = ap.parse_args()
@@ -213,7 +218,7 @@ def main() -> int:
                 chunks.append(("text", f"Image: {alt}" if alt.strip() else "Image: (no alt text provided)"))
             else:
                 try:
-                    raw, ext = resolve_image_bytes(src, base_dir)
+                    raw, ext = resolve_image_bytes(src, base_dir, args.base_url)
                     chunks.append((f"image:{ext}", None))  # payload filled after we know the index
                     chunks[-1] = (f"image:{ext}", raw)
                     image_count += 1
