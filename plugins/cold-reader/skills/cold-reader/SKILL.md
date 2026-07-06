@@ -54,10 +54,15 @@ installs its own dependencies — no setup needed):
 
 ```bash
 WORKDIR=$(mktemp -d /tmp/cold-reader-XXXXXX)
-"${CLAUDE_PLUGIN_ROOT}/skills/cold-reader/scripts/chunk.py" /tmp/source.md --workdir "$WORKDIR"
+"${CLAUDE_PLUGIN_ROOT}/skills/cold-reader/scripts/chunk.py" /tmp/source.md --workdir "$WORKDIR" --title "The Document's Real Title"
 ```
 
 Flags:
+- `--title "..."` — the document's title, emitted as the first chunk. **Pass this** unless
+  the title is already the first line of the Markdown. A real reader sees the title before
+  the body — it's often what tells them what the piece is about and bridges the opening — so
+  omitting it makes the cold read unfairly harsh on the intro. Many exports (e.g. the
+  LessWrong API `markdown` field) give you the body without the title; supply it here.
 - `--no-vision` — replace images with `Image: <alt text>` (how a screen-reader user
   experiences them). Use this to evaluate accessibility, or if the reading agent has no vision.
 - `--target-words N` — approx. words before a long paragraph is split at sentence

@@ -178,6 +178,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("source", help="Path to the source Markdown file")
     ap.add_argument("--workdir", required=True, help="Output directory for chunk files")
+    ap.add_argument("--title", help="Document title; emitted as the first chunk (an H1), the way a real reader sees it before the body")
     ap.add_argument("--target-words", type=int, default=90, help="Approx. words before a paragraph is split (default: 90)")
     ap.add_argument("--no-vision", action="store_true", help="Replace images with 'Image: <alt text>' instead of extracting them")
     args = ap.parse_args()
@@ -196,6 +197,11 @@ def main() -> int:
     chunks: list[tuple[str, str]] = []  # (kind, payload) where kind is "text" or "image:<ext>"
     image_count = 0
     image_errors: list[str] = []
+
+    if args.title and args.title.strip():
+        # A real reader sees the title first; give it its own leading chunk as an H1.
+        title = args.title.strip().lstrip("#").strip()
+        chunks.append(("text", f"# {title}"))
 
     for block_type, text in top_level_blocks(md_text):
         if not text.strip():
