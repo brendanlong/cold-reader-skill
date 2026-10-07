@@ -31,6 +31,17 @@ forward; a bad one is a *promise* that keeps asking them to wait.
 
 ## Setup
 
+### Any agent (via [skills.sh](https://skills.sh))
+
+```bash
+npx skills add brendanlong/cold-reader-skill
+```
+
+This installs the skill into Claude Code, Cursor, Codex, and other agents that support
+skills. The skill works best in agents that can run subagents.
+
+### Claude Code plugin
+
 Register this repo as a marketplace (one-time):
 
 ```bash
@@ -67,6 +78,8 @@ field in `.claude-plugin/marketplace.json`, so it must be bumped for updates to 
 
 - [`uv`](https://docs.astral.sh/uv/) — the chunker is a self-contained `uv` script that
   installs its own dependencies (`markdown-it-py`, `pysbd`, `requests`) on first run.
+  Without `uv`, `pip install markdown-it-py pysbd requests` and run it with `python3`
+  (3.10+).
 - `pandoc` (optional) — only needed to convert non-Markdown sources.
 
 ## Layout
