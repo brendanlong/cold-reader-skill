@@ -52,7 +52,7 @@ flatten into plain links) and drop any print-only footnote/URL dumps. Then:
 ### 2. Choose persona(s)
 
 Ask the user which persona(s) to read as if they haven't said. Available personas live in
-`personas/` next to this SKILL.md:
+`personas/<name>.md` next to this SKILL.md:
 
 - `free-reader` — blog / Reddit / LessWrong reader with a short attention span (default for personal posts)
 - `paper-reviewer` — workshop / research paper reviewer
@@ -65,17 +65,18 @@ also describe a custom persona — write it to a temp `.md` file in the same for
 ### 3. Chunk the document
 
 Pick a fresh working directory and run the chunker, `scripts/chunk.py` next to this
-SKILL.md (`SKILL_DIR` below is this skill's directory):
+SKILL.md:
 
 ```bash
+SKILL_DIR=/absolute/path/to/this/skill  # the directory containing this SKILL.md
 WORKDIR=$(mktemp -d /tmp/cold-reader-XXXXXX)
 "$SKILL_DIR/scripts/chunk.py" /tmp/source.md --workdir "$WORKDIR" --title "The Document's Real Title"
 ```
 
 The shebang runs it via [`uv`](https://docs.astral.sh/uv/), which installs its
 dependencies (`markdown-it-py`, `pysbd`, `requests`) automatically. If `uv` isn't
-available, install them with pip and run `python3 "$SKILL_DIR/scripts/chunk.py" ...`
-instead (Python 3.10+).
+available, run `pip install markdown-it-py pysbd requests` (in a virtualenv if the system
+Python refuses) and then `python3 "$SKILL_DIR/scripts/chunk.py" ...` instead (Python 3.10+).
 
 Flags:
 - `--title "..."` — the document's title, emitted as the first chunk. **Pass this** unless
